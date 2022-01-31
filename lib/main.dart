@@ -71,10 +71,25 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  Future<Null> _addTime(BuildContext context) async {
+  void _removeTimer(TimeOfDay time) {
+    setState(() {
+      _timerList.remove(time);
+    });
+  }
+
+  Future<void> _addTime(BuildContext context) async {
     final selectedTime =
         await showTimePicker(context: context, initialTime: TimeOfDay.now());
     if (selectedTime != null) _addTimer(selectedTime);
+  }
+
+  Future<void> _editTime(BuildContext context, TimeOfDay targetTime) async {
+    final selectedTime =
+        await showTimePicker(context: context, initialTime: targetTime);
+    if (selectedTime != null) {
+      _removeTimer(targetTime);
+      _addTimer(selectedTime);
+    }
   }
 
   @override
@@ -89,22 +104,26 @@ class _MyHomePageState extends State<MyHomePage> {
           itemBuilder: (context, index) {
             final targetTime = _timerList.keys.toList()[index];
             final targetEnabled = _timerList[targetTime]!;
-            return ListTile(
-              title: Text(
-                targetTime.format(context),
-                style:
-                    const TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
-              ),
-              trailing: Container(
-                  child: Icon(
-                targetEnabled ? Icons.alarm : Icons.alarm_off,
-                color: targetEnabled
-                    ? Theme.of(context).primaryColor
-                    : Theme.of(context).disabledColor,
-              )),
-              onTap: () =>
-                  setState(() => _timerList[targetTime] = !targetEnabled),
-            );
+            return Dismissible(
+                key: Key(targetTime.toString()),
+                onDismissed: (direction) => _removeTimer(targetTime),
+                background: Container(color: Colors.red),
+                child: ListTile(
+                    title: Text(
+                      targetTime.format(context),
+                      style: const TextStyle(
+                          fontSize: 30, fontWeight: FontWeight.bold),
+                    ),
+                    trailing: InkWell(
+                        onTap: () => setState(
+                            () => _timerList[targetTime] = !targetEnabled),
+                        child: Icon(
+                          targetEnabled ? Icons.alarm : Icons.alarm_off,
+                          color: targetEnabled
+                              ? Theme.of(context).primaryColor
+                              : Theme.of(context).disabledColor,
+                        )),
+                    onTap: () => _editTime(context, targetTime)));
           }),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _addTime(context),
