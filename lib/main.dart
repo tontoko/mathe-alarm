@@ -81,7 +81,7 @@ class _MyHomePageState extends State<MyHomePage> {
               key.minute == _now.minute)) {
         FlutterRingtonePlayer.play(
           android: AndroidSounds.notification,
-          ios: const IosSound(1023),
+          ios: IosSounds.alarm,
           looping: true, // Android only - API >= 28
           volume: 0.2, // Android only - API >= 28
           asAlarm: true, // Android only - all APIs
