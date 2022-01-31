@@ -1,9 +1,16 @@
 import 'dart:async';
-import 'dart:ffi';
+import 'dart:math';
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 
 import 'package:flutter/material.dart';
 
 double toDouble(TimeOfDay time) => time.hour + time.minute / 60.0;
+
+extension DateTimeExtension on DateTime {
+  DateTime applied(TimeOfDay time) {
+    return DateTime(year, month, day, time.hour, time.minute);
+  }
+}
 
 void main() {
   runApp(const MyApp());
@@ -56,6 +63,53 @@ typedef TimerList = Map<TimeOfDay, bool>;
 
 class _MyHomePageState extends State<MyHomePage> {
   TimerList _timerList = {};
+  DateTime _now = DateTime.now();
+  bool isAlartShow = false;
+
+  @override
+  void initState() {
+    Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() => _now = _now.add(const Duration(seconds: 1)));
+      _timerList.keys.forEach((key) {
+        print(key.toString());
+        print(_now.toString());
+      });
+      if (!isAlartShow &&
+          _timerList.keys.any((key) =>
+              _timerList[key] != null &&
+              key.hour == _now.hour &&
+              key.minute == _now.minute)) {
+        FlutterRingtonePlayer.play(
+          android: AndroidSounds.notification,
+          ios: const IosSound(1023),
+          looping: true, // Android only - API >= 28
+          volume: 0.2, // Android only - API >= 28
+          asAlarm: true, // Android only - all APIs
+        );
+        showDialog(
+            barrierDismissible: false,
+            context: context,
+            builder: (context) {
+              int numA = Random().nextInt(9);
+              int numB = Random().nextInt(9);
+
+              return AlarmAlert(
+                handleStopAlarm: () {
+                  FlutterRingtonePlayer.stop();
+                  Navigator.pop(context);
+                  setState(() => isAlartShow = false);
+                },
+                numA: numA,
+                numB: numB,
+              );
+            });
+        setState(() {
+          isAlartShow = true;
+        });
+      }
+    });
+    super.initState();
+  }
 
   void _addTimer(TimeOfDay time) {
     setState(() {
@@ -131,5 +185,47 @@ class _MyHomePageState extends State<MyHomePage> {
         child: const Icon(Icons.add),
       ), // This trailing comma makes auto-formatting nicer for build methods.
     );
+  }
+}
+
+class AlarmAlert extends StatefulWidget {
+  final int numA;
+  final int numB;
+  final VoidCallback handleStopAlarm;
+  const AlarmAlert(
+      {Key? key,
+      required this.numA,
+      required this.numB,
+      required this.handleStopAlarm})
+      : super(key: key);
+
+  @override
+  _AlarmAlertState createState() => _AlarmAlertState();
+}
+
+class _AlarmAlertState extends State<AlarmAlert> {
+  void _handleAnswer(String value) {
+    if (value != '' && int.parse(value) == widget.numA * widget.numB) {
+      widget.handleStopAlarm();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+        title: const Text(
+          'solve this question to stop alarm',
+          style: TextStyle(),
+        ),
+        content: Column(children: [
+          Text("${widget.numA} X ${widget.numB} = ????",
+              style:
+                  const TextStyle(fontSize: 40, fontWeight: FontWeight.bold)),
+          TextField(
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              onChanged: (value) => _handleAnswer(value))
+        ]));
   }
 }
