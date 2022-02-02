@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
 
 import 'package:flutter/material.dart';
 
@@ -62,11 +65,12 @@ class MyHomePage extends StatefulWidget {
 
 typedef TimerList = Map<TimeOfDay, bool>;
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   TimerList _timerList = {};
   DateTime _now = DateTime.now();
   bool isAlartShow = false;
-  late Timer iosSoundTimer;
+  late Timer? iosSoundTimer;
+  late DateTime _pausedDate;
 
   void _showAlarm() {
     if (Platform.isIOS) {
@@ -105,7 +109,9 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _handleStopAlarm() {
     FlutterRingtonePlayer.stop();
-    if (iosSoundTimer.isActive) iosSoundTimer.cancel();
+    if (iosSoundTimer != null && iosSoundTimer!.isActive) {
+      iosSoundTimer!.cancel();
+    }
     Navigator.pop(context);
     setState(() => isAlartShow = false);
   }
@@ -125,6 +131,50 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     });
     super.initState();
+    WidgetsBinding.instance?.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance?.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Future<void> didChangeAppLifecycleState(AppLifecycleState state) async {
+    if (state == AppLifecycleState.paused) {
+      print('app paused');
+      final notificationId = DateTime.now().hashCode;
+      setState(() {
+        _pausedDate = DateTime.now();
+      });
+      final nextTimer = tz.TZDateTime.fromMicrosecondsSinceEpoch(
+          tz.local,
+          _timerList.keys
+              .where((e) => _timerList[e]!)
+              .map((e) => DateTime.now().applied(e).microsecondsSinceEpoch)
+              .reduce(min));
+      await FlutterLocalNotificationsPlugin().initialize(
+          const InitializationSettings(
+              android: AndroidInitializationSettings('app_icon'),
+              iOS: IOSInitializationSettings()));
+      FlutterLocalNotificationsPlugin().zonedSchedule(
+          notificationId,
+          "alart!!",
+          "open to solve question",
+          nextTimer,
+          const NotificationDetails(
+              android: AndroidNotificationDetails(
+                  'your channel id', 'your channel name',
+                  importance: Importance.max, priority: Priority.high),
+              iOS: IOSNotificationDetails()),
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+          androidAllowWhileIdle: true);
+    } else if (state == AppLifecycleState.resumed) {
+      print('app resumed');
+      setState(() => _now = DateTime.now());
+    }
   }
 
   void _addTimer(TimeOfDay time) {
