@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 
@@ -65,47 +66,62 @@ class _MyHomePageState extends State<MyHomePage> {
   TimerList _timerList = {};
   DateTime _now = DateTime.now();
   bool isAlartShow = false;
+  late Timer iosSoundTimer;
+
+  void _showAlarm() {
+    if (Platform.isIOS) {
+      iosSoundTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+        FlutterRingtonePlayer.play(
+          android: AndroidSounds.notification,
+          ios: IosSounds.alarm,
+        );
+      });
+    } else {
+      FlutterRingtonePlayer.play(
+        android: AndroidSounds.notification,
+        ios: IosSounds.alarm,
+        looping: true, // Android only - API >= 28
+        volume: 0.4, // Android only - API >= 28
+        asAlarm: true, // Android only - all APIs
+      );
+    }
+    showDialog(
+        barrierDismissible: false,
+        context: context,
+        builder: (context) {
+          int numA = Random().nextInt(9);
+          int numB = Random().nextInt(9);
+
+          return AlarmAlert(
+            handleStopAlarm: _handleStopAlarm,
+            numA: numA,
+            numB: numB,
+          );
+        });
+    setState(() {
+      isAlartShow = true;
+    });
+  }
+
+  void _handleStopAlarm() {
+    FlutterRingtonePlayer.stop();
+    if (iosSoundTimer.isActive) iosSoundTimer.cancel();
+    Navigator.pop(context);
+    setState(() => isAlartShow = false);
+  }
 
   @override
   void initState() {
     Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() => _now = _now.add(const Duration(seconds: 1)));
-      _timerList.keys.forEach((key) {
-        print(key.toString());
-        print(_now.toString());
-      });
+      print(_now.toString());
       if (!isAlartShow &&
           _timerList.keys.any((key) =>
-              _timerList[key] != null &&
+              _timerList[key] == true &&
               key.hour == _now.hour &&
-              key.minute == _now.minute)) {
-        FlutterRingtonePlayer.play(
-          android: AndroidSounds.notification,
-          ios: IosSounds.alarm,
-          looping: true, // Android only - API >= 28
-          volume: 0.2, // Android only - API >= 28
-          asAlarm: true, // Android only - all APIs
-        );
-        showDialog(
-            barrierDismissible: false,
-            context: context,
-            builder: (context) {
-              int numA = Random().nextInt(9);
-              int numB = Random().nextInt(9);
-
-              return AlarmAlert(
-                handleStopAlarm: () {
-                  FlutterRingtonePlayer.stop();
-                  Navigator.pop(context);
-                  setState(() => isAlartShow = false);
-                },
-                numA: numA,
-                numB: numB,
-              );
-            });
-        setState(() {
-          isAlartShow = true;
-        });
+              key.minute == _now.minute &&
+              _now.second == 0)) {
+        _showAlarm();
       }
     });
     super.initState();
@@ -205,7 +221,7 @@ class AlarmAlert extends StatefulWidget {
 
 class _AlarmAlertState extends State<AlarmAlert> {
   void _handleAnswer(String value) {
-    if (value != '' && int.parse(value) == widget.numA * widget.numB) {
+    if (value != '' && int.tryParse(value) == widget.numA * widget.numB) {
       widget.handleStopAlarm();
     }
   }
