@@ -71,6 +71,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   bool isAlartShow = false;
   late Timer? iosSoundTimer;
   late DateTime _pausedDate;
+  late int _notificationId;
 
   void _showAlarm() {
     if (Platform.isIOS) {
@@ -144,7 +145,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   Future<void> didChangeAppLifecycleState(AppLifecycleState state) async {
     if (state == AppLifecycleState.paused) {
       print('app paused');
-      final notificationId = DateTime.now().hashCode;
+      _notificationId = DateTime.now().hashCode;
       setState(() {
         _pausedDate = DateTime.now();
       });
@@ -159,7 +160,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               android: AndroidInitializationSettings('app_icon'),
               iOS: IOSInitializationSettings()));
       FlutterLocalNotificationsPlugin().zonedSchedule(
-          notificationId,
+          _notificationId,
           "alart!!",
           "open to solve question",
           nextTimer,
@@ -173,6 +174,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           androidAllowWhileIdle: true);
     } else if (state == AppLifecycleState.resumed) {
       print('app resumed');
+      FlutterLocalNotificationsPlugin().cancel(_notificationId);
       setState(() => _now = DateTime.now());
     }
   }
