@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/data/latest.dart' as tz;
+import 'package:provider/provider.dart';
 import 'package:timezone/timezone.dart' as tz;
 
 import 'package:flutter/material.dart';
@@ -16,8 +16,20 @@ extension DateTimeExtension on DateTime {
   }
 }
 
+class AppSettingsModel extends ChangeNotifier {
+  var _hardMode = false;
+
+  void changeMode(bool value) {
+    _hardMode = value;
+    notifyListeners();
+  }
+}
+
 void main() {
-  runApp(const MyApp());
+  runApp(ChangeNotifierProvider(
+    create: (context) => AppSettingsModel(),
+    child: const MyApp(),
+  ));
 }
 
 class MyApp extends StatelessWidget {
@@ -40,8 +52,39 @@ class MyApp extends StatelessWidget {
         // is not restarted.
         primarySwatch: Colors.blue,
       ),
-      home: const MyHomePage(title: 'Timers'),
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const MyHomePage(
+              title: 'Timers',
+            ),
+        '/settings': (context) => const SettingsPage()
+      },
     );
+  }
+}
+
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+        appBar: AppBar(
+          title: const Text('Settings'),
+        ),
+        body: Consumer<AppSettingsModel>(
+            builder: (context, settings, child) => ListView(
+                  children: [
+                    SwitchListTile(
+                      title: const Text('hard mode'),
+                      secondary: const Icon(Icons.warning),
+                      onChanged: (bool value) {
+                        settings.changeMode(value);
+                      },
+                      value: settings._hardMode,
+                    )
+                  ],
+                )));
   }
 }
 
@@ -93,16 +136,18 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     showDialog(
         barrierDismissible: false,
         context: context,
-        builder: (context) {
-          int numA = Random().nextInt(9);
-          int numB = Random().nextInt(9);
+        builder: (context) =>
+            Consumer<AppSettingsModel>(builder: (context, settings, child) {
+              final baseRandomNum = settings._hardMode ? 99 : 9;
+              int numA = Random().nextInt(baseRandomNum);
+              int numB = Random().nextInt(baseRandomNum);
 
-          return AlarmAlert(
-            handleStopAlarm: _handleStopAlarm,
-            numA: numA,
-            numB: numB,
-          );
-        });
+              return AlarmAlert(
+                handleStopAlarm: _handleStopAlarm,
+                numA: numA,
+                numB: numB,
+              );
+            }));
     setState(() {
       isAlartShow = true;
     });
@@ -219,6 +264,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.title),
+        actions: [
+          IconButton(
+              onPressed: () => Navigator.pushNamed(context, '/settings'),
+              icon: const Icon(Icons.settings))
+        ],
       ),
       body: ListView.separated(
           itemCount: _timerList.length,
