@@ -306,11 +306,30 @@ class AlarmAlert extends StatefulWidget {
   _AlarmAlertState createState() => _AlarmAlertState();
 }
 
-class _AlarmAlertState extends State<AlarmAlert> {
+class _AlarmAlertState extends State<AlarmAlert>
+    with SingleTickerProviderStateMixin {
   void _handleAnswer(String value) {
     if (value != '' && int.tryParse(value) == widget.numA * widget.numB) {
       widget.handleStopAlarm();
     }
+  }
+
+  late Animation<double> animation;
+  late AnimationController controller;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = AnimationController(
+        duration: const Duration(milliseconds: 10), vsync: this);
+    animation = Tween<double>(begin: 0, end: 5).animate(controller);
+    controller.repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
   }
 
   @override
@@ -321,6 +340,7 @@ class _AlarmAlertState extends State<AlarmAlert> {
         style: TextStyle(),
       ),
       content: Column(children: [
+        AnimatedAlarm(animtaion: animation),
         Text("${widget.numA} X ${widget.numB} = ????",
             style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold)),
         TextField(
@@ -330,5 +350,22 @@ class _AlarmAlertState extends State<AlarmAlert> {
             onChanged: (value) => _handleAnswer(value))
       ]),
     );
+  }
+}
+
+class AnimatedAlarm extends AnimatedWidget {
+  const AnimatedAlarm({Key? key, required Animation<double> animtaion})
+      : super(key: key, listenable: animtaion);
+
+  @override
+  Widget build(BuildContext context) {
+    final animation = listenable as Animation<double>;
+    return Container(
+        height: IconTheme.of(context).size! + 25,
+        padding: EdgeInsets.only(bottom: animation.value),
+        child: Icon(
+          Icons.alarm,
+          size: IconTheme.of(context).size! + 20,
+        ));
   }
 }
