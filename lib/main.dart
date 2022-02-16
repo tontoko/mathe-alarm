@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
@@ -6,7 +7,11 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/timezone.dart' as tz;
+import 'package:path/path.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:flutter/material.dart';
+
+import 'model/timer.dart';
 
 double toDouble(TimeOfDay time) => time.hour + time.minute / 60.0;
 
@@ -20,12 +25,12 @@ class AppSettingsModel extends ChangeNotifier {
   bool _hardMode = false;
   late SharedPreferences _pref;
 
-  AppSettingsModel() {
+  AppSettingsModel(SharedPreferences pref) {
+    _pref = pref;
     _init();
   }
 
-  _init() async {
-    _pref = await SharedPreferences.getInstance();
+  _init() {
     _hardMode = _pref.getBool("hardMode") ?? false;
   }
 
@@ -36,11 +41,99 @@ class AppSettingsModel extends ChangeNotifier {
   }
 }
 
-void main() {
-  runApp(ChangeNotifierProvider(
-    create: (context) => AppSettingsModel(),
-    child: const MyApp(),
-  ));
+class TimerModel extends ChangeNotifier {
+  List<AppTimer> timerList = [];
+  DateTime now = DateTime.now();
+  bool isAlartShow = false;
+  late Database _database;
+
+  TimerModel(Database database) {
+    _database = database;
+    _init();
+
+    Timer.periodic(const Duration(seconds: 1), (timer) {
+      now = DateTime.now();
+      print(now.toString());
+      notifyListeners();
+    });
+  }
+
+  _init() async {
+    await getTimers();
+    notifyListeners();
+  }
+
+  getTimers() async {
+    final List<Map<String, dynamic>> maps = await _database.query("timers");
+    timerList = List.generate(maps.length, (i) {
+      return AppTimer(
+        id: maps[i]['id']!,
+        time: TimeOfDay.fromDateTime(
+          DateTime.fromMillisecondsSinceEpoch(maps[i]['time']),
+        ),
+        enabled: maps[i]['enabled'] == 1,
+      );
+    });
+  }
+
+  void addTimer(TimeOfDay time) async {
+    _database.insert(
+      'timers',
+      AppTimer(time: time, enabled: true).toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    await getTimers();
+    notifyListeners();
+  }
+
+  void updateTimer(AppTimer data) async {
+    await _database.update(
+      'timers',
+      AppTimer(time: data.time, enabled: data.enabled).toMap(),
+      where: 'id = ?',
+      whereArgs: [data.id],
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    await getTimers();
+    notifyListeners();
+  }
+
+  void removeTimer(int id) async {
+    await _database.delete(
+      'timers',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    await getTimers();
+    notifyListeners();
+  }
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final database = await openDatabase(
+    join(await getDatabasesPath(), 'database.db'),
+    onCreate: (db, version) {
+      return db.execute(
+        'CREATE TABLE timers(id INTEGER PRIMARY KEY AUTOINCREMENT, time INTEGER, enabled INTEGER)',
+      );
+    },
+    version: 1,
+  );
+  final SharedPreferences pref = await SharedPreferences.getInstance();
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (context) => AppSettingsModel(pref),
+        ),
+        ChangeNotifierProvider(
+          create: (context) => TimerModel(database),
+        )
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -55,8 +148,9 @@ class MyApp extends StatelessWidget {
       ),
       initialRoute: '/',
       routes: {
-        '/': (context) => const MyHomePage(
-              title: 'Timers',
+        '/': (context) => Consumer<TimerModel>(
+              builder: (context, timer, child) =>
+                  MyHomePage(title: 'Timers', timer: timer),
             ),
         '/settings': (context) => const SettingsPage()
       },
@@ -92,22 +186,24 @@ class SettingsPage extends StatelessWidget {
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({Key? key, required this.title}) : super(key: key);
+  const MyHomePage({Key? key, required this.title, required this.timer})
+      : super(key: key);
 
   final String title;
+  final TimerModel timer;
+
+  void addTimer(TimeOfDay selectedTime) async => timer.addTimer(selectedTime);
+  void updateTimer(AppTimer data, int id) async => timer.updateTimer(
+        AppTimer(id: id, time: data.time, enabled: data.enabled),
+      );
+  void removeTimer(int id) async => timer.removeTimer(id);
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-typedef TimerList = Map<TimeOfDay, bool>;
-
 class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
-  TimerList _timerList = {};
-  DateTime _now = DateTime.now();
-  bool isAlartShow = false;
   late Timer? iosSoundTimer;
-  late DateTime _pausedDate;
   late int _notificationId;
 
   void _showAlarm() {
@@ -127,23 +223,27 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         asAlarm: true, // Android only - all APIs
       );
     }
-    showDialog(
-        barrierDismissible: false,
-        context: context,
-        builder: (context) =>
-            Consumer<AppSettingsModel>(builder: (context, settings, child) {
-              final baseRandomNum = settings._hardMode ? 99 : 9;
-              int numA = Random().nextInt(baseRandomNum);
-              int numB = Random().nextInt(baseRandomNum);
+    widget.timer.isAlartShow = true;
 
-              return AlarmAlert(
-                handleStopAlarm: _handleStopAlarm,
-                numA: numA,
-                numB: numB,
-              );
-            }));
-    setState(() {
-      isAlartShow = true;
+    // avoid setState() or markNeedsBuild() called during build
+    WidgetsBinding.instance?.addPostFrameCallback((_) {
+      showDialog(
+        barrierDismissible: false,
+        context: this.context,
+        builder: (context) => Consumer<AppSettingsModel>(
+          builder: (context, settings, child) {
+            final baseRandomNum = settings._hardMode ? 99 : 9;
+            int numA = Random().nextInt(baseRandomNum);
+            int numB = Random().nextInt(baseRandomNum);
+
+            return AlarmAlert(
+              handleStopAlarm: _handleStopAlarm,
+              numA: numA,
+              numB: numB,
+            );
+          },
+        ),
+      );
     });
   }
 
@@ -152,24 +252,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (iosSoundTimer != null && iosSoundTimer!.isActive) {
       iosSoundTimer!.cancel();
     }
-    Navigator.pop(context);
-    setState(() => isAlartShow = false);
+    Navigator.pop(this.context);
+    widget.timer.isAlartShow = false;
   }
 
   @override
   void initState() {
-    Timer.periodic(const Duration(seconds: 1), (timer) {
-      setState(() => _now = _now.add(const Duration(seconds: 1)));
-      print(_now.toString());
-      if (!isAlartShow &&
-          _timerList.keys.any((key) =>
-              _timerList[key] == true &&
-              key.hour == _now.hour &&
-              key.minute == _now.minute &&
-              _now.second == 0)) {
-        _showAlarm();
-      }
-    });
     super.initState();
     WidgetsBinding.instance?.addObserver(this);
   }
@@ -185,71 +273,66 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused) {
       print('app paused');
       _notificationId = DateTime.now().hashCode;
-      setState(() {
-        _pausedDate = DateTime.now();
-      });
       final nextTimer = tz.TZDateTime.fromMicrosecondsSinceEpoch(
-          tz.local,
-          _timerList.keys
-              .where((e) => _timerList[e]!)
-              .map((e) => DateTime.now().applied(e).microsecondsSinceEpoch)
-              .reduce(min));
+        tz.local,
+        widget.timer.timerList
+            .where((e) => e.enabled)
+            .map((e) => DateTime.now().applied(e.time).microsecondsSinceEpoch)
+            .reduce(min),
+      );
       await FlutterLocalNotificationsPlugin().initialize(
-          const InitializationSettings(
-              android: AndroidInitializationSettings('app_icon'),
-              iOS: IOSInitializationSettings()));
+        const InitializationSettings(
+          android: AndroidInitializationSettings('app_icon'),
+          iOS: IOSInitializationSettings(),
+        ),
+      );
       FlutterLocalNotificationsPlugin().zonedSchedule(
           _notificationId,
           "alart!!",
           "open to solve question",
           nextTimer,
           const NotificationDetails(
-              android: AndroidNotificationDetails(
-                  'your channel id', 'your channel name',
-                  importance: Importance.max, priority: Priority.high),
-              iOS: IOSNotificationDetails()),
+            android: AndroidNotificationDetails(
+                'your channel id', 'your channel name',
+                importance: Importance.max, priority: Priority.high),
+            iOS: IOSNotificationDetails(),
+          ),
           uiLocalNotificationDateInterpretation:
               UILocalNotificationDateInterpretation.absoluteTime,
           androidAllowWhileIdle: true);
     } else if (state == AppLifecycleState.resumed) {
       print('app resumed');
       FlutterLocalNotificationsPlugin().cancel(_notificationId);
-      setState(() => _now = DateTime.now());
     }
   }
 
-  void _addTimer(TimeOfDay time) {
-    setState(() {
-      var timerListCopy = {..._timerList};
-      timerListCopy[time] = true;
-      var sortedKeys = timerListCopy.keys.toList();
-      sortedKeys.sort((a, b) => toDouble(a).compareTo(toDouble(b)));
-      TimerList sortedTimerList = {};
-      for (var key in sortedKeys) {
-        sortedTimerList[key] = timerListCopy[key]!;
-      }
-      _timerList = sortedTimerList;
-    });
-  }
-
-  void _removeTimer(TimeOfDay time) {
-    setState(() {
-      _timerList.remove(time);
-    });
-  }
-
   Future<void> _addTime(BuildContext context) async {
-    final selectedTime =
-        await showTimePicker(context: context, initialTime: TimeOfDay.now());
-    if (selectedTime != null) _addTimer(selectedTime);
+    final selectedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+    );
+    if (selectedTime != null) widget.addTimer(selectedTime);
   }
 
-  Future<void> _editTime(BuildContext context, TimeOfDay targetTime) async {
+  Future<void> _editTime(BuildContext context, AppTimer target) async {
     final selectedTime =
-        await showTimePicker(context: context, initialTime: targetTime);
+        await showTimePicker(context: context, initialTime: target.time);
     if (selectedTime != null) {
-      _removeTimer(targetTime);
-      _addTimer(selectedTime);
+      widget.updateTimer(
+          AppTimer(time: selectedTime, enabled: target.enabled), target.id!);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant MyHomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.timer.isAlartShow &&
+        widget.timer.timerList.any((timer) =>
+            timer.enabled == true &&
+            timer.time.hour == widget.timer.now.hour &&
+            timer.time.minute == widget.timer.now.minute &&
+            widget.timer.now.second == 0)) {
+      _showAlarm();
     }
   }
 
@@ -260,19 +343,21 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         title: Text(widget.title),
         actions: [
           IconButton(
-              onPressed: () => Navigator.pushNamed(context, '/settings'),
-              icon: const Icon(Icons.settings))
+            onPressed: () => Navigator.pushNamed(context, '/settings'),
+            icon: const Icon(Icons.settings),
+          )
         ],
       ),
       body: ListView.separated(
-          itemCount: _timerList.length,
+          itemCount: widget.timer.timerList.length,
           separatorBuilder: (context, index) => const Divider(),
           itemBuilder: (context, index) {
-            final targetTime = _timerList.keys.toList()[index];
-            final targetEnabled = _timerList[targetTime]!;
+            final targetTime = widget.timer.timerList[index].time;
+            final targetEnabled = widget.timer.timerList[index].enabled;
+            final id = widget.timer.timerList[index].id;
             return Dismissible(
               key: Key(targetTime.toString()),
-              onDismissed: (direction) => _removeTimer(targetTime),
+              onDismissed: (direction) => widget.removeTimer(id!),
               background: Container(color: Colors.red),
               child: ListTile(
                 title: Text(
@@ -281,15 +366,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                       fontSize: 30, fontWeight: FontWeight.bold),
                 ),
                 trailing: InkWell(
-                    onTap: () =>
-                        setState(() => _timerList[targetTime] = !targetEnabled),
-                    child: Icon(
-                      targetEnabled ? Icons.alarm : Icons.alarm_off,
-                      color: targetEnabled
-                          ? Theme.of(context).primaryColor
-                          : Theme.of(context).disabledColor,
-                    )),
-                onTap: () => _editTime(context, targetTime),
+                  onTap: () => widget.updateTimer(
+                      AppTimer(time: targetTime, enabled: !targetEnabled), id!),
+                  child: Icon(
+                    targetEnabled ? Icons.alarm : Icons.alarm_off,
+                    color: targetEnabled
+                        ? Theme.of(context).primaryColor
+                        : Theme.of(context).disabledColor,
+                  ),
+                ),
+                onTap: () => _editTime(context, widget.timer.timerList[index]),
               ),
             );
           }),
@@ -351,7 +437,7 @@ class _AlarmAlertState extends State<AlarmAlert>
         style: TextStyle(),
       ),
       content: Column(children: [
-        AnimatedAlarm(animtaion: animation),
+        AnimatedAlarm(animation: animation),
         Text("${widget.numA} X ${widget.numB} = ????",
             style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold)),
         TextField(
@@ -365,18 +451,19 @@ class _AlarmAlertState extends State<AlarmAlert>
 }
 
 class AnimatedAlarm extends AnimatedWidget {
-  const AnimatedAlarm({Key? key, required Animation<double> animtaion})
-      : super(key: key, listenable: animtaion);
+  const AnimatedAlarm({Key? key, required Animation<double> animation})
+      : super(key: key, listenable: animation);
 
   @override
   Widget build(BuildContext context) {
     final animation = listenable as Animation<double>;
     return Container(
-        height: IconTheme.of(context).size! + 25,
-        padding: EdgeInsets.only(bottom: animation.value),
-        child: Icon(
-          Icons.alarm,
-          size: IconTheme.of(context).size! + 20,
-        ));
+      height: IconTheme.of(context).size! + 25,
+      padding: EdgeInsets.only(bottom: animation.value),
+      child: Icon(
+        Icons.alarm,
+        size: IconTheme.of(context).size! + 20,
+      ),
+    );
   }
 }
