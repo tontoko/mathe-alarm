@@ -4,8 +4,8 @@ import 'dart:math';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/timezone.dart' as tz;
-
 import 'package:flutter/material.dart';
 
 double toDouble(TimeOfDay time) => time.hour + time.minute / 60.0;
@@ -17,9 +17,20 @@ extension DateTimeExtension on DateTime {
 }
 
 class AppSettingsModel extends ChangeNotifier {
-  var _hardMode = false;
+  bool _hardMode = false;
+  late SharedPreferences _pref;
 
-  void changeMode(bool value) {
+  AppSettingsModel() {
+    _init();
+  }
+
+  _init() async {
+    _pref = await SharedPreferences.getInstance();
+    _hardMode = _pref.getBool("hardMode") ?? false;
+  }
+
+  void changeMode(bool value) async {
+    _pref.setBool('hardMode', value);
     _hardMode = value;
     notifyListeners();
   }
