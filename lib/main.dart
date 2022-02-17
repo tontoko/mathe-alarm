@@ -6,6 +6,7 @@ import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
@@ -121,6 +122,8 @@ void main() async {
     version: 1,
   );
   final SharedPreferences pref = await SharedPreferences.getInstance();
+  tz.initializeTimeZones();
+
   runApp(
     MultiProvider(
       providers: [
@@ -289,7 +292,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       FlutterLocalNotificationsPlugin().zonedSchedule(
           _notificationId,
           "alart!!",
-          "open to solve question",
+          "",
           nextTimer,
           const NotificationDetails(
             android: AndroidNotificationDetails(
